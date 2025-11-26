@@ -1,0 +1,22 @@
+# Base requirements for WhisperX (core dependencies only)
+# Use this if you want to manually manage PyTorch versions
+# Install: pip install -r requirements-base.txt
+
+ctranslate2>=4.5.0
+faster-whisper>=1.1.1
+nltk>=3.9.1
+
+# Restrict numpy, onnxruntime, pandas, av to be compatible with Python 3.9
+numpy>=2.0.2,<2.1.0; python_version <'3.13'
+onnxruntime>=1.19,<1.20.0; python_version <'3.10'
+pandas>=2.2.3,<2.3.0
+av<16.0.0
+numpy>=2.1.0,<2.3.0; python_version >='3.13'
+
+# Updated to >=4.0.1 for Jetson/torchaudio 2.x compatibility
+pyannote-audio>=4.0.1
+
+# Speechbrain from git for Jetson/torchaudio 2.x compatibility
+git+https://github.com/speechbrain/speechbrain.git@develop
+
+transformers>=4.48.0

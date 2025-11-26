@@ -18,11 +18,20 @@ dependencies = [
     "pandas>=2.2.3,<2.3.0",
     "av<16.0.0",
     "numpy>=2.1.0,<2.3.0; python_version >='3.13'",
-    "pyannote-audio>=3.3.2,<4.0.0",
+    # Updated to >=4.0.1 for Jetson/torchaudio 2.x compatibility (fixes AudioMetaData issue)
+    "pyannote-audio>=4.0.1",
+    # Install speechbrain from git for Jetson/torchaudio 2.x compatibility (fixes list_audio_backends issue)
+    "speechbrain @ git+https://github.com/speechbrain/speechbrain.git@develop",
+    "transformers>=4.48.0",
+]
+
+# Optional dependencies for standard installations
+# Jetson users should NOT install these (use pre-installed torch/torchaudio)
+[project.optional-dependencies]
+torch = [
     "torch~=2.8.0",
     "torchaudio~=2.8.0",
-    "transformers>=4.48.0",
-    "triton>=3.3.0; sys_platform == 'linux' and platform_machine == 'x86_64'" # only install triton on x86_64 Linux
+    "triton>=3.3.0; sys_platform == 'linux' and platform_machine == 'x86_64'",
 ]
 
 
@@ -40,6 +49,9 @@ where = ["."]
 include = ["whisperx*"]
 
 [tool.uv.sources]
+# speechbrain from git for Jetson/torchaudio 2.x compatibility
+speechbrain = { git = "https://github.com/speechbrain/speechbrain.git", branch = "develop" }
+
 torch = [
   { index = "pytorch-cpu", marker = "sys_platform == 'darwin'" },
   { index = "pytorch-cpu", marker = "platform_machine != 'x86_64' and sys_platform != 'darwin'" },
