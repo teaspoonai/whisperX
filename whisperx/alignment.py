@@ -292,6 +292,23 @@ def align(
                 else:
                     raise NotImplementedError(f"Align model of type {model_type} not supported.")
                 emissions = torch.log_softmax(emissions, dim=-1)
+            except RuntimeError as e:
+                error_msg = str(e)
+                if "CUDA" in error_msg or "out of memory" in error_msg.lower() or "NvMap" in error_msg:
+                    # CUDA OOM error - provide helpful fallback suggestion
+                    logger.error(f"CUDA memory allocation failed during alignment: {error_msg}")
+                    logger.error("This is likely due to limited GPU memory on your device.")
+                    logger.error("Try one of the following:")
+                    logger.error("1. Reduce audio chunk size")
+                    logger.error("2. Use CPU for alignment (slower but uses less GPU memory)")
+                    logger.error("3. Increase GPU memory or use a device with more GPU memory")
+                    raise RuntimeError(
+                        "Alignment failed due to CUDA memory allocation error. "
+                        "Your device may not have enough GPU memory for the wav2vec2 alignment model. "
+                        "Consider using a device with more GPU memory or disable alignment with --disable_align."
+                    ) from e
+                else:
+                    raise
             finally:
                 # Clear CUDA cache after inference to prevent memory fragmentation
                 if device != "cpu" and torch.cuda.is_available():
