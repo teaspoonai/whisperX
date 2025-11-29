@@ -5,33 +5,32 @@ name = "whisperx"
 version = "3.7.4"
 description = "Time-Accurate Automatic Speech Recognition using Whisper."
 readme = "README.md"
-requires-python = ">=3.9, <3.14"
+requires-python = ">=3.10, <3.14"
 license = { text = "BSD-2-Clause" }
 
 dependencies = [
-    "ctranslate2>=4.5.0",
-    "faster-whisper>=1.1.1",
-    "nltk>=3.9.1",
-    # Restrict numpy, onnxruntime, pandas, av to be compatible with Python 3.9
-    "numpy>=2.0.2,<2.1.0; python_version <'3.13'",
-    "onnxruntime>=1.19,<1.20.0; python_version <'3.10'",
-    "pandas>=2.2.3,<2.3.0",
-    "av<16.0.0",
-    "numpy>=2.1.0,<2.3.0; python_version >='3.13'",
-    # Updated to >=4.0.1 for Jetson/torchaudio 2.x compatibility (fixes AudioMetaData issue)
-    "pyannote-audio>=4.0.1",
-    # Install speechbrain from git for Jetson/torchaudio 2.x compatibility (fixes list_audio_backends issue)
-    "speechbrain @ git+https://github.com/speechbrain/speechbrain.git@develop",
-    "transformers>=4.48.0",
+  "ctranslate2>=4.5.0",
+  "faster-whisper>=1.1.1",
+  "nltk>=3.9.1",
+  "numpy>=2.0.2",
+  "omegaconf>=2.3.0",
+  "onnxruntime>=1.19",
+  "pandas>=2.2.3",
+  "av<16.0.0",
+  # Updated to >=4.0.1 for Jetson/torchaudio 2.x compatibility (fixes AudioMetaData issue)
+  "pyannote-audio>=4.0.1",
+  # Install speechbrain from git for Jetson/torchaudio 2.x compatibility (fixes list_audio_backends issue)
+  "speechbrain @ git+https://github.com/speechbrain/speechbrain.git@develop",
+  "transformers>=4.48.0",
 ]
 
 # Optional dependencies for standard installations
 # Jetson users should NOT install these (use pre-installed torch/torchaudio)
 [project.optional-dependencies]
 torch = [
-    "torch~=2.8.0",
-    "torchaudio~=2.8.0",
-    "triton>=3.3.0; sys_platform == 'linux' and platform_machine == 'x86_64'",
+  "torch~=2.8.0",
+  "torchaudio~=2.8.0",
+  "triton>=3.3.0; sys_platform == 'linux' and platform_machine == 'x86_64'",
 ]
 
 
@@ -62,9 +61,7 @@ torchaudio = [
   { index = "pytorch-cpu", marker = "platform_machine != 'x86_64' and sys_platform != 'darwin'" },
   { index = "pytorch", marker = "platform_machine == 'x86_64' and sys_platform != 'darwin'" },
 ]
-triton = [
-  { index = "pytorch", marker = "sys_platform == 'linux'" },
-]
+triton = [{ index = "pytorch", marker = "sys_platform == 'linux'" }]
 
 [[tool.uv.index]]
 name = "pytorch"
