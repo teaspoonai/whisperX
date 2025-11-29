@@ -279,14 +279,19 @@ def align(
         else:
             lengths = None
 
-        with torch.inference_mode():
-            if model_type == "torchaudio":
-                emissions, _ = model(waveform_segment.to(device), lengths=lengths)
-            elif model_type == "huggingface":
-                emissions = model(waveform_segment.to(device)).logits
-            else:
-                raise NotImplementedError(f"Align model of type {model_type} not supported.")
-            emissions = torch.log_softmax(emissions, dim=-1)
+        with torch.inference_mode(), torch.no_grad():
+            try:
+                if model_type == "torchaudio":
+                    emissions, _ = model(waveform_segment.to(device), lengths=lengths)
+                elif model_type == "huggingface":
+                    emissions = model(waveform_segment.to(device)).logits
+                else:
+                    raise NotImplementedError(f"Align model of type {model_type} not supported.")
+                emissions = torch.log_softmax(emissions, dim=-1)
+            finally:
+                # Clear CUDA cache after inference to prevent memory fragmentation
+                if device != "cpu" and torch.cuda.is_available():
+                    torch.cuda.empty_cache()
 
         emission = emissions[0].cpu().detach()
 
