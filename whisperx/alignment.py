@@ -106,6 +106,8 @@ def load_align_model(language_code: str, device: str, model_name: Optional[str] 
                 align_model = bundle.get_model(dl_kwargs={"model_dir": model_dir}).to(device)
             else:
                 raise
+        # Set model to eval mode and disable gradients for inference
+        align_model.eval()
         labels = bundle.get_labels()
         align_dictionary = {c.lower(): i for i, c in enumerate(labels)}
     else:
@@ -125,6 +127,8 @@ def load_align_model(language_code: str, device: str, model_name: Optional[str] 
                 raise ValueError(f'The chosen align_model "{model_name}" could not be found in huggingface (https://huggingface.co/models) or torchaudio (https://pytorch.org/audio/stable/pipelines.html#id14)')
         pipeline_type = "huggingface"
         align_model = align_model.to(device)
+        # Set model to eval mode for inference
+        align_model.eval()
         labels = processor.tokenizer.get_vocab()
         align_dictionary = {char.lower(): code for char,code in processor.tokenizer.get_vocab().items()}
 
