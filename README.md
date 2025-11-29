@@ -111,6 +111,19 @@ uv sync --all-extras --dev
 
 You may also need to install ffmpeg, rust etc. Follow openAI instructions here https://github.com/openai/whisper#setup.
 
+#### Option C: Jetson Installation
+
+For **NVIDIA Jetson devices** (Nano, TX2, Xavier, Orin, etc.) with torchaudio 2.x, this branch includes specific compatibility fixes. See [JETSON_INSTALL.md](JETSON_INSTALL.md) for detailed instructions.
+
+Quick install:
+```bash
+pip install -e . --no-build-isolation
+```
+
+This installation method preserves your Jetson-optimized PyTorch/torchaudio builds and includes fixes for:
+- `AudioMetaData` compatibility (via pyannote-audio >=4.0.1)
+- `list_audio_backends()` removal in torchaudio 2.x (via speechbrain from git)
+
 ### Speaker Diarization
 
 To **enable Speaker Diarization**, include your Hugging Face access token (read) that you can generate from [Here](https://huggingface.co/settings/tokens) after the `--hf_token` argument and accept the user agreement for the following models: [Segmentation](https://huggingface.co/pyannote/segmentation-3.0) and [Speaker-Diarization-3.1](https://huggingface.co/pyannote/speaker-diarization-3.1) (if you choose to use Speaker-Diarization 2.x, follow requirements [here](https://huggingface.co/pyannote/speaker-diarization) instead.)
