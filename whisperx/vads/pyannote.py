@@ -10,6 +10,7 @@ from pyannote.audio.pipelines import VoiceActivityDetection
 from pyannote.audio.pipelines.utils import PipelineModel
 from pyannote.core import Annotation, SlidingWindowFeature
 from pyannote.core import Segment
+from omegaconf import ListConfig
 
 from whisperx.diarize import Segment as SegmentX
 from whisperx.vads.vad import Vad
@@ -40,7 +41,25 @@ def load_vad_model(device, vad_onset=0.500, vad_offset=0.363, use_auth_token=Non
 
     model_bytes = open(model_fp, "rb").read()
 
-    vad_model = Model.from_pretrained(model_fp, token=use_auth_token)
+    # Handle PyTorch 2.6+ strict unpickling with OmegaConf ListConfig
+    try:
+        vad_model = Model.from_pretrained(model_fp, token=use_auth_token)
+    except Exception as e:
+        if "weights_only" in str(e) or "ListConfig" in str(e):
+            # For PyTorch 2.6+, use safe_globals context manager to allow OmegaConf
+            torch.serialization.add_safe_globals([ListConfig])
+            try:
+                vad_model = Model.from_pretrained(model_fp, token=use_auth_token)
+            except Exception as retry_error:
+                # If still failing, log and re-raise with more helpful message
+                logger.error(f"Failed to load VAD model: {retry_error}")
+                raise RuntimeError(
+                    "Failed to load VAD model. This may be due to PyTorch version incompatibility. "
+                    "Try updating PyTorch or use an alternative VAD method with --vad_method silero"
+                ) from retry_error
+        else:
+            raise
+
     hyperparameters = {"onset": vad_onset,
                     "offset": vad_offset,
                     "min_duration_on": 0.1,

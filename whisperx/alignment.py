@@ -6,6 +6,7 @@ import math
 
 from dataclasses import dataclass
 from typing import Iterable, Optional, Union, List
+import warnings
 
 import numpy as np
 import pandas as pd
@@ -93,7 +94,27 @@ def load_align_model(language_code: str, device: str, model_name: Optional[str] 
     if model_name in torchaudio.pipelines.__all__:
         pipeline_type = "torchaudio"
         bundle = torchaudio.pipelines.__dict__[model_name]
-        align_model = bundle.get_model(dl_kwargs={"model_dir": model_dir}).to(device)
+        # Handle PyTorch 2.6+ strict unpickling
+        try:
+            align_model = bundle.get_model(dl_kwargs={"model_dir": model_dir}).to(device)
+        except (TypeError, RuntimeError) as e:
+            error_msg = str(e)
+            if "weights_only" in error_msg:
+                # For PyTorch 2.6+, register safe globals for strict unpickling
+                from omegaconf import ListConfig
+                torch.serialization.add_safe_globals([ListConfig])
+                align_model = bundle.get_model(dl_kwargs={"model_dir": model_dir}).to(device)
+            else:
+                raise
+        # Set model to eval mode and disable gradients for inference
+        align_model.eval()
+        # Try to use float16 on GPU for reduced memory usage
+        if device != "cpu" and hasattr(align_model, 'half'):
+            try:
+                align_model = align_model.half()
+                logger.info("Model loaded in float16 mode for reduced memory usage")
+            except Exception as e:
+                logger.warning(f"Could not convert model to float16: {e}. Using float32.")
         labels = bundle.get_labels()
         align_dictionary = {c.lower(): i for i, c in enumerate(labels)}
     else:
@@ -101,11 +122,27 @@ def load_align_model(language_code: str, device: str, model_name: Optional[str] 
             processor = Wav2Vec2Processor.from_pretrained(model_name, cache_dir=model_dir)
             align_model = Wav2Vec2ForCTC.from_pretrained(model_name, cache_dir=model_dir)
         except Exception as e:
-            print(e)
-            print(f"Error loading model from huggingface, check https://huggingface.co/models for finetuned wav2vec2.0 models")
-            raise ValueError(f'The chosen align_model "{model_name}" could not be found in huggingface (https://huggingface.co/models) or torchaudio (https://pytorch.org/audio/stable/pipelines.html#id14)')
+            # Handle PyTorch 2.6+ weights_only issues for HuggingFace models
+            if "weights_only" in str(e):
+                from omegaconf import ListConfig
+                torch.serialization.add_safe_globals([ListConfig])
+                processor = Wav2Vec2Processor.from_pretrained(model_name, cache_dir=model_dir)
+                align_model = Wav2Vec2ForCTC.from_pretrained(model_name, cache_dir=model_dir)
+            else:
+                print(e)
+                print(f"Error loading model from huggingface, check https://huggingface.co/models for finetuned wav2vec2.0 models")
+                raise ValueError(f'The chosen align_model "{model_name}" could not be found in huggingface (https://huggingface.co/models) or torchaudio (https://pytorch.org/audio/stable/pipelines.html#id14)')
         pipeline_type = "huggingface"
         align_model = align_model.to(device)
+        # Set model to eval mode for inference
+        align_model.eval()
+        # Try to use float16 on GPU for reduced memory usage
+        if device != "cpu" and hasattr(align_model, 'half'):
+            try:
+                align_model = align_model.half()
+                logger.info("Model loaded in float16 mode for reduced memory usage")
+            except Exception as e:
+                logger.warning(f"Could not convert model to float16: {e}. Using float32.")
         labels = processor.tokenizer.get_vocab()
         align_dictionary = {char.lower(): code for char,code in processor.tokenizer.get_vocab().items()}
 
@@ -247,23 +284,54 @@ def align(
 
         # TODO: Probably can get some speedup gain with batched inference here
         waveform_segment = audio[:, f1:f2]
+
+        # Move waveform to device before any processing
+        waveform_segment = waveform_segment.to(device)
+
         # Handle the minimum input length for wav2vec2 models
         if waveform_segment.shape[-1] < 400:
-            lengths = torch.as_tensor([waveform_segment.shape[-1]]).to(device)
+            lengths = torch.as_tensor([waveform_segment.shape[-1]], device=device)
             waveform_segment = torch.nn.functional.pad(
                 waveform_segment, (0, 400 - waveform_segment.shape[-1])
             )
         else:
             lengths = None
 
-        with torch.inference_mode():
-            if model_type == "torchaudio":
-                emissions, _ = model(waveform_segment.to(device), lengths=lengths)
-            elif model_type == "huggingface":
-                emissions = model(waveform_segment.to(device)).logits
-            else:
-                raise NotImplementedError(f"Align model of type {model_type} not supported.")
-            emissions = torch.log_softmax(emissions, dim=-1)
+        with torch.inference_mode(), torch.no_grad():
+            try:
+                # Match input dtype to model dtype (handles float16 models)
+                model_dtype = next(model.parameters()).dtype
+                if waveform_segment.dtype != model_dtype:
+                    waveform_segment = waveform_segment.to(model_dtype)
+
+                if model_type == "torchaudio":
+                    emissions, _ = model(waveform_segment, lengths=lengths)
+                elif model_type == "huggingface":
+                    emissions = model(waveform_segment).logits
+                else:
+                    raise NotImplementedError(f"Align model of type {model_type} not supported.")
+                emissions = torch.log_softmax(emissions, dim=-1)
+            except RuntimeError as e:
+                error_msg = str(e)
+                if "CUDA" in error_msg or "out of memory" in error_msg.lower() or "NvMap" in error_msg:
+                    # CUDA OOM error - provide helpful fallback suggestion
+                    logger.error(f"CUDA memory allocation failed during alignment: {error_msg}")
+                    logger.error("This is likely due to limited GPU memory on your device.")
+                    logger.error("Try one of the following:")
+                    logger.error("1. Reduce audio chunk size")
+                    logger.error("2. Use CPU for alignment (slower but uses less GPU memory)")
+                    logger.error("3. Increase GPU memory or use a device with more GPU memory")
+                    raise RuntimeError(
+                        "Alignment failed due to CUDA memory allocation error. "
+                        "Your device may not have enough GPU memory for the wav2vec2 alignment model. "
+                        "Consider using a device with more GPU memory or disable alignment with --disable_align."
+                    ) from e
+                else:
+                    raise
+            finally:
+                # Clear CUDA cache after inference to prevent memory fragmentation
+                if device != "cpu" and torch.cuda.is_available():
+                    torch.cuda.empty_cache()
 
         emission = emissions[0].cpu().detach()
 
