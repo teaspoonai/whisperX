@@ -299,6 +299,11 @@ def align(
 
         with torch.inference_mode(), torch.no_grad():
             try:
+                # Match input dtype to model dtype (handles float16 models)
+                model_dtype = next(model.parameters()).dtype
+                if waveform_segment.dtype != model_dtype:
+                    waveform_segment = waveform_segment.to(model_dtype)
+
                 if model_type == "torchaudio":
                     emissions, _ = model(waveform_segment, lengths=lengths)
                 elif model_type == "huggingface":
