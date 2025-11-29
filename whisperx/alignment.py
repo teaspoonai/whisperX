@@ -279,12 +279,15 @@ def align(
         else:
             lengths = None
 
+        # Move waveform to device before inference
+        waveform_segment = waveform_segment.to(device)
+
         with torch.inference_mode(), torch.no_grad():
             try:
                 if model_type == "torchaudio":
-                    emissions, _ = model(waveform_segment.to(device), lengths=lengths)
+                    emissions, _ = model(waveform_segment, lengths=lengths)
                 elif model_type == "huggingface":
-                    emissions = model(waveform_segment.to(device)).logits
+                    emissions = model(waveform_segment).logits
                 else:
                     raise NotImplementedError(f"Align model of type {model_type} not supported.")
                 emissions = torch.log_softmax(emissions, dim=-1)
