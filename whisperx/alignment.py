@@ -6,6 +6,7 @@ import math
 
 from dataclasses import dataclass
 from typing import Iterable, Optional, Union, List
+import warnings
 
 import numpy as np
 import pandas as pd
@@ -93,7 +94,18 @@ def load_align_model(language_code: str, device: str, model_name: Optional[str] 
     if model_name in torchaudio.pipelines.__all__:
         pipeline_type = "torchaudio"
         bundle = torchaudio.pipelines.__dict__[model_name]
-        align_model = bundle.get_model(dl_kwargs={"model_dir": model_dir}).to(device)
+        # Handle PyTorch 2.6+ strict unpickling
+        try:
+            align_model = bundle.get_model(dl_kwargs={"model_dir": model_dir}).to(device)
+        except (TypeError, RuntimeError) as e:
+            error_msg = str(e)
+            if "weights_only" in error_msg:
+                # For PyTorch 2.6+, register safe globals for strict unpickling
+                from omegaconf import ListConfig
+                torch.serialization.add_safe_globals([ListConfig])
+                align_model = bundle.get_model(dl_kwargs={"model_dir": model_dir}).to(device)
+            else:
+                raise
         labels = bundle.get_labels()
         align_dictionary = {c.lower(): i for i, c in enumerate(labels)}
     else:
@@ -101,9 +113,16 @@ def load_align_model(language_code: str, device: str, model_name: Optional[str] 
             processor = Wav2Vec2Processor.from_pretrained(model_name, cache_dir=model_dir)
             align_model = Wav2Vec2ForCTC.from_pretrained(model_name, cache_dir=model_dir)
         except Exception as e:
-            print(e)
-            print(f"Error loading model from huggingface, check https://huggingface.co/models for finetuned wav2vec2.0 models")
-            raise ValueError(f'The chosen align_model "{model_name}" could not be found in huggingface (https://huggingface.co/models) or torchaudio (https://pytorch.org/audio/stable/pipelines.html#id14)')
+            # Handle PyTorch 2.6+ weights_only issues for HuggingFace models
+            if "weights_only" in str(e):
+                from omegaconf import ListConfig
+                torch.serialization.add_safe_globals([ListConfig])
+                processor = Wav2Vec2Processor.from_pretrained(model_name, cache_dir=model_dir)
+                align_model = Wav2Vec2ForCTC.from_pretrained(model_name, cache_dir=model_dir)
+            else:
+                print(e)
+                print(f"Error loading model from huggingface, check https://huggingface.co/models for finetuned wav2vec2.0 models")
+                raise ValueError(f'The chosen align_model "{model_name}" could not be found in huggingface (https://huggingface.co/models) or torchaudio (https://pytorch.org/audio/stable/pipelines.html#id14)')
         pipeline_type = "huggingface"
         align_model = align_model.to(device)
         labels = processor.tokenizer.get_vocab()
