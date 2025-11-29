@@ -108,6 +108,13 @@ def load_align_model(language_code: str, device: str, model_name: Optional[str] 
                 raise
         # Set model to eval mode and disable gradients for inference
         align_model.eval()
+        # Try to use float16 on GPU for reduced memory usage
+        if device != "cpu" and hasattr(align_model, 'half'):
+            try:
+                align_model = align_model.half()
+                logger.info("Model loaded in float16 mode for reduced memory usage")
+            except Exception as e:
+                logger.warning(f"Could not convert model to float16: {e}. Using float32.")
         labels = bundle.get_labels()
         align_dictionary = {c.lower(): i for i, c in enumerate(labels)}
     else:
@@ -129,6 +136,13 @@ def load_align_model(language_code: str, device: str, model_name: Optional[str] 
         align_model = align_model.to(device)
         # Set model to eval mode for inference
         align_model.eval()
+        # Try to use float16 on GPU for reduced memory usage
+        if device != "cpu" and hasattr(align_model, 'half'):
+            try:
+                align_model = align_model.half()
+                logger.info("Model loaded in float16 mode for reduced memory usage")
+            except Exception as e:
+                logger.warning(f"Could not convert model to float16: {e}. Using float32.")
         labels = processor.tokenizer.get_vocab()
         align_dictionary = {char.lower(): code for char,code in processor.tokenizer.get_vocab().items()}
 
