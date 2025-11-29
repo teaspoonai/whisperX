@@ -270,17 +270,18 @@ def align(
 
         # TODO: Probably can get some speedup gain with batched inference here
         waveform_segment = audio[:, f1:f2]
+
+        # Move waveform to device before any processing
+        waveform_segment = waveform_segment.to(device)
+
         # Handle the minimum input length for wav2vec2 models
         if waveform_segment.shape[-1] < 400:
-            lengths = torch.as_tensor([waveform_segment.shape[-1]]).to(device)
+            lengths = torch.as_tensor([waveform_segment.shape[-1]], device=device)
             waveform_segment = torch.nn.functional.pad(
                 waveform_segment, (0, 400 - waveform_segment.shape[-1])
             )
         else:
             lengths = None
-
-        # Move waveform to device before inference
-        waveform_segment = waveform_segment.to(device)
 
         with torch.inference_mode(), torch.no_grad():
             try:
