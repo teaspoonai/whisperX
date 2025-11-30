@@ -10,7 +10,7 @@ from pyannote.audio.pipelines import VoiceActivityDetection
 from pyannote.audio.pipelines.utils import PipelineModel
 from pyannote.core import Annotation, SlidingWindowFeature
 from pyannote.core import Segment
-from omegaconf import ListConfig
+from omegaconf import ListConfig, DictConfig
 
 from whisperx.diarize import Segment as SegmentX
 from whisperx.vads.vad import Vad
@@ -41,22 +41,64 @@ def load_vad_model(device, vad_onset=0.500, vad_offset=0.363, use_auth_token=Non
 
     model_bytes = open(model_fp, "rb").read()
 
-    # Handle PyTorch 2.6+ strict unpickling with OmegaConf ListConfig
+    # Handle PyTorch 2.6+ strict unpickling with OmegaConf classes
+    # Pyannote checkpoints use multiple OmegaConf classes that need to be registered
     try:
         vad_model = Model.from_pretrained(model_fp, token=use_auth_token)
     except Exception as e:
-        if "weights_only" in str(e) or "ListConfig" in str(e):
-            # For PyTorch 2.6+, use safe_globals context manager to allow OmegaConf
-            torch.serialization.add_safe_globals([ListConfig])
+        error_msg = str(e)
+        if "weights_only" in error_msg or "omegaconf" in error_msg.lower():
+            logger.info("Registering OmegaConf classes for PyTorch 2.6+ compatibility...")
             try:
+                # Register all OmegaConf classes that Pyannote models might use
+                # This includes: ListConfig, DictConfig, and their metadata classes
+                torch.serialization.add_safe_globals([
+                    ListConfig,
+                    DictConfig,
+                ])
+
+                # Try loading again with OmegaConf classes registered
                 vad_model = Model.from_pretrained(model_fp, token=use_auth_token)
             except Exception as retry_error:
-                # If still failing, log and re-raise with more helpful message
-                logger.error(f"Failed to load VAD model: {retry_error}")
-                raise RuntimeError(
-                    "Failed to load VAD model. This may be due to PyTorch version incompatibility. "
-                    "Try updating PyTorch or use an alternative VAD method with --vad_method silero"
-                ) from retry_error
+                retry_msg = str(retry_error)
+                # Check if there are still unregistered OmegaConf classes
+                if "omegaconf" in retry_msg.lower() and "Unsupported global" in retry_msg:
+                    logger.warning(
+                        f"Additional OmegaConf class needs registration. "
+                        f"Attempting to extract and register from error message..."
+                    )
+                    # Try to extract the missing class name from the error
+                    # Format: "Unsupported global: GLOBAL omegaconf.base.ContainerMetadata"
+                    if "omegaconf." in retry_msg:
+                        try:
+                            # Import omegaconf base module to access ContainerMetadata and other classes
+                            from omegaconf import base
+                            # Register all commonly used OmegaConf internals
+                            torch.serialization.add_safe_globals([
+                                getattr(base, 'ContainerMetadata', None),
+                            ])
+                            # Filter out None values
+                            registered = [x for x in [base.ContainerMetadata] if x is not None]
+                            if registered:
+                                logger.info(f"Registered additional OmegaConf classes: {registered}")
+                                vad_model = Model.from_pretrained(model_fp, token=use_auth_token)
+                            else:
+                                raise retry_error
+                        except Exception as third_attempt_error:
+                            logger.error(f"Failed to load VAD model after retries: {third_attempt_error}")
+                            raise RuntimeError(
+                                "Failed to load VAD model. OmegaConf compatibility issue with PyTorch 2.6+. "
+                                "Try updating PyTorch or use an alternative VAD method with --vad_method silero"
+                            ) from third_attempt_error
+                    else:
+                        raise retry_error
+                else:
+                    # Different error, not OmegaConf related
+                    logger.error(f"Failed to load VAD model: {retry_error}")
+                    raise RuntimeError(
+                        "Failed to load VAD model. This may be due to PyTorch version incompatibility. "
+                        "Try updating PyTorch or use an alternative VAD method with --vad_method silero"
+                    ) from retry_error
         else:
             raise
 
