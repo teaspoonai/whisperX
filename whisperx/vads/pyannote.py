@@ -100,7 +100,7 @@ def load_vad_model(device, vad_onset=0.500, vad_offset=0.363, use_auth_token=Non
     # Handle PyTorch 2.6+ strict unpickling with OmegaConf and other classes
     # Pyannote checkpoints use multiple classes that need to be registered
     vad_model = None
-    max_retries = 5
+    max_retries = 15
     retry_count = 0
 
     while retry_count < max_retries and vad_model is None:
@@ -143,8 +143,9 @@ def load_vad_model(device, vad_onset=0.500, vad_offset=0.363, use_auth_token=Non
 
     if vad_model is None:
         raise RuntimeError(
-            f"Failed to load VAD model after {max_retries} attempts. "
-            "Too many missing safe globals for PyTorch 2.6+ strict unpickling. "
+            "Failed to load VAD model. PyTorch 2.6+ strict unpickling encountered "
+            "too many unresolvable missing safe globals. This is a compatibility issue "
+            "with the Pyannote model and PyTorch 2.6+. "
             "Try using --vad_method silero as an alternative."
         )
 
