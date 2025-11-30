@@ -18,8 +18,8 @@ dependencies = [
   "av<16.0.0",
   # Updated to >=4.0.1 for Jetson/torchaudio 2.x compatibility (fixes AudioMetaData issue)
   "pyannote-audio>=4.0.1",
-  # Install speechbrain from git for Jetson/torchaudio 2.x compatibility (fixes list_audio_backends issue)
-  "speechbrain @ git+https://github.com/speechbrain/speechbrain.git@develop",
+  # Install speechbrain from git pinned to specific commit for Jetson/torchaudio 2.x compatibility
+  "speechbrain @ git+https://github.com/speechbrain/speechbrain.git@fac03671bf9c3a8706eaf82d850be9bb987ccf97",
   "transformers>=4.48.0",
 ]
 
@@ -48,8 +48,8 @@ where = ["."]
 include = ["whisperx*"]
 
 [tool.uv.sources]
-# speechbrain from git for Jetson/torchaudio 2.x compatibility
-speechbrain = { git = "https://github.com/speechbrain/speechbrain.git", branch = "develop" }
+# speechbrain from git pinned to specific commit for Jetson/torchaudio 2.x compatibility
+speechbrain = { git = "https://github.com/speechbrain/speechbrain.git", rev = "fac03671bf9c3a8706eaf82d850be9bb987ccf97" }
 
 torch = [
   { index = "pytorch-cpu", marker = "sys_platform == 'darwin'" },

@@ -1,4 +1,6 @@
 import os
+import typing
+import re
 from typing import Callable, Text, Union
 from typing import Optional
 
@@ -10,13 +12,67 @@ from pyannote.audio.pipelines import VoiceActivityDetection
 from pyannote.audio.pipelines.utils import PipelineModel
 from pyannote.core import Annotation, SlidingWindowFeature
 from pyannote.core import Segment
-from omegaconf import ListConfig
+from omegaconf import ListConfig, DictConfig
 
 from whisperx.diarize import Segment as SegmentX
 from whisperx.vads.vad import Vad
 from whisperx.log_utils import get_logger
 
 logger = get_logger(__name__)
+
+
+def _extract_and_register_missing_globals(error_msg: str) -> list:
+    """
+    Extract missing class names from PyTorch 2.6+ unpickling errors and register them.
+
+    PyTorch errors like:
+    "Unsupported global: GLOBAL omegaconf.base.ContainerMetadata was not an allowed global"
+
+    Args:
+        error_msg: The error message from torch.load with weights_only=True
+
+    Returns:
+        List of classes that were successfully registered
+    """
+    registered_classes = []
+
+    # Pattern: "Unsupported global: GLOBAL module.path.ClassName"
+    pattern = r"GLOBAL\s+([\w.]+)"
+    matches = re.findall(pattern, error_msg)
+
+    for full_path in matches:
+        try:
+            parts = full_path.rsplit(".", 1)
+            if len(parts) == 2:
+                module_path, class_name = parts
+
+                # Try to import and register the class
+                try:
+                    module = __import__(module_path, fromlist=[class_name])
+                    cls = getattr(module, class_name, None)
+                    if cls is not None:
+                        torch.serialization.add_safe_globals([cls])
+                        registered_classes.append(cls)
+                        logger.info(f"Registered missing global: {full_path}")
+                except (ImportError, AttributeError) as e:
+                    logger.debug(f"Could not register {full_path}: {e}")
+
+            elif len(parts) == 1:
+                # Built-in type case (e.g., "list", "dict", "tuple")
+                class_name = parts[0]
+                import builtins
+                cls = getattr(builtins, class_name, None)
+                if cls is not None:
+                    torch.serialization.add_safe_globals([cls])
+                    registered_classes.append(cls)
+                    logger.info(f"Registered built-in global: {full_path}")
+                else:
+                    logger.debug(f"Could not find {full_path} in builtins")
+
+        except Exception as e:
+            logger.debug(f"Error processing {full_path}: {e}")
+
+    return registered_classes
 
 
 def load_vad_model(device, vad_onset=0.500, vad_offset=0.363, use_auth_token=None, model_fp=None):
@@ -41,24 +97,57 @@ def load_vad_model(device, vad_onset=0.500, vad_offset=0.363, use_auth_token=Non
 
     model_bytes = open(model_fp, "rb").read()
 
-    # Handle PyTorch 2.6+ strict unpickling with OmegaConf ListConfig
-    try:
-        vad_model = Model.from_pretrained(model_fp, token=use_auth_token)
-    except Exception as e:
-        if "weights_only" in str(e) or "ListConfig" in str(e):
-            # For PyTorch 2.6+, use safe_globals context manager to allow OmegaConf
-            torch.serialization.add_safe_globals([ListConfig])
-            try:
-                vad_model = Model.from_pretrained(model_fp, token=use_auth_token)
-            except Exception as retry_error:
-                # If still failing, log and re-raise with more helpful message
-                logger.error(f"Failed to load VAD model: {retry_error}")
+    # Handle PyTorch 2.6+ strict unpickling with OmegaConf and other classes
+    # Pyannote checkpoints use multiple classes that need to be registered
+    vad_model = None
+    max_retries = 15
+    retry_count = 0
+
+    while retry_count < max_retries and vad_model is None:
+        try:
+            vad_model = Model.from_pretrained(model_fp, token=use_auth_token)
+        except Exception as e:
+            error_msg = str(e)
+            retry_count += 1
+
+            # Check if this is a weights_only/unpickling error
+            if "weights_only" in error_msg or "Unsupported global" in error_msg:
+                if retry_count == 1:
+                    # First attempt: register known OmegaConf classes
+                    logger.info("PyTorch 2.6+ detected. Registering OmegaConf classes...")
+                    torch.serialization.add_safe_globals([ListConfig, DictConfig])
+
+                elif retry_count <= max_retries:
+                    # Subsequent attempts: extract missing classes from error message
+                    logger.warning(
+                        f"Attempt {retry_count}: Additional class registration needed. "
+                        f"Extracting from error message..."
+                    )
+                    registered = _extract_and_register_missing_globals(error_msg)
+                    if not registered:
+                        # Could not extract any classes, give up
+                        logger.error(f"Could not extract missing classes from error: {error_msg}")
+                        raise RuntimeError(
+                            "Failed to load VAD model. PyTorch 2.6+ strict unpickling error. "
+                            "Unable to determine missing safe globals. "
+                            "Try using --vad_method silero as an alternative."
+                        ) from e
+
+            else:
+                # Not a weights_only error, propagate
+                logger.error(f"Failed to load VAD model: {error_msg}")
                 raise RuntimeError(
                     "Failed to load VAD model. This may be due to PyTorch version incompatibility. "
                     "Try updating PyTorch or use an alternative VAD method with --vad_method silero"
-                ) from retry_error
-        else:
-            raise
+                ) from e
+
+    if vad_model is None:
+        raise RuntimeError(
+            "Failed to load VAD model. PyTorch 2.6+ strict unpickling encountered "
+            "too many unresolvable missing safe globals. This is a compatibility issue "
+            "with the Pyannote model and PyTorch 2.6+. "
+            "Try using --vad_method silero as an alternative."
+        )
 
     hyperparameters = {"onset": vad_onset,
                     "offset": vad_offset,
