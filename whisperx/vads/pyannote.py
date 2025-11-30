@@ -56,6 +56,19 @@ def _extract_and_register_missing_globals(error_msg: str) -> list:
                         logger.info(f"Registered missing global: {full_path}")
                 except (ImportError, AttributeError) as e:
                     logger.debug(f"Could not register {full_path}: {e}")
+
+            elif len(parts) == 1:
+                # Built-in type case (e.g., "list", "dict", "tuple")
+                class_name = parts[0]
+                import builtins
+                cls = getattr(builtins, class_name, None)
+                if cls is not None:
+                    torch.serialization.add_safe_globals([cls])
+                    registered_classes.append(cls)
+                    logger.info(f"Registered built-in global: {full_path}")
+                else:
+                    logger.debug(f"Could not find {full_path} in builtins")
+
         except Exception as e:
             logger.debug(f"Error processing {full_path}: {e}")
 
